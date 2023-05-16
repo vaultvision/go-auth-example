@@ -91,6 +91,7 @@ func (o *Handler) init(ctx context.Context) error {
 	o.mux.Handle("/logout", Func(o.getLogout))
 	o.mux.Handle("/auth/logout", Func(o.getAuthLogout))
 	o.mux.Handle("/settings", Func(o.getSettings))
+	o.mux.Handle("/auth/settings", Func(o.getAuthSettings))
 
 	// static route
 	staticFs := http.FS(os.DirFS(o.cfg.StaticDir))
@@ -132,19 +133,29 @@ func (o *Handler) getIndex(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// /settings just redirects to /auth/settings. But it could contain any app
+// specific logic or a confirmation page that shows a settings button.
 func (o *Handler) getSettings(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != "GET" {
 		return newError(http.StatusMethodNotAllowed, "")
 	}
 
-	redir, err := url.JoinPath(o.cfg.VVIssuerURL, "/settings")
-	if err != nil {
-		return err
-	}
-	http.Redirect(w, r, redir, http.StatusFound)
+	http.Redirect(w, r, "/auth/settings", http.StatusFound)
 	return nil
 }
 
+// /auth/settings redirects to the Vault Vision settings page so users can
+// manage their email, password, social logins, webauthn credentials and more.
+//
+// This works by using an oidc prompt named "settings". When the user returns
+// your session will be updated to reflect any changes they made.
+func (o *Handler) getAuthSettings(w http.ResponseWriter, r *http.Request) error {
+	return o.getAuthLoginOpts(w, r,
+		oauth2.SetAuthURLParam("prompt", "settings"))
+}
+
+// /login just redirects to /auth/login. But it could contain any app specific
+// logic or a confirmation page that shows a login button.
 func (o *Handler) getLogin(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != "GET" {
 		return newError(http.StatusMethodNotAllowed, "")
@@ -154,7 +165,17 @@ func (o *Handler) getLogin(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// /auth/login kicks off the OIDC flow by redirecting to Vault Vision. Once
+// authentication is complete the user will be returned to /auth/callback.
 func (o *Handler) getAuthLogin(w http.ResponseWriter, r *http.Request) error {
+	return o.getAuthLoginOpts(w, r)
+}
+
+func (o *Handler) getAuthLoginOpts(
+	w http.ResponseWriter,
+	r *http.Request,
+	authCodeOpts ...oauth2.AuthCodeOption,
+) error {
 	if r.Method != "GET" {
 		return newError(http.StatusMethodNotAllowed, "")
 	}
@@ -194,11 +215,7 @@ func (o *Handler) getAuthLogin(w http.ResponseWriter, r *http.Request) error {
 		oauth2.SetAuthURLParam("code_challenge", pkceChallenge),
 		oauth2.SetAuthURLParam("code_challenge_method", "S256"),
 	}
-
-	qv := r.URL.Query()
-	for k := range qv {
-		opts = append(opts, oauth2.SetAuthURLParam(k, qv.Get(k)))
-	}
+	opts = append(opts, authCodeOpts...)
 
 	redir, err := pvr.GetAuthCodeURL(ctx, state, opts...)
 	if err != nil {
@@ -209,6 +226,8 @@ func (o *Handler) getAuthLogin(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// Once Vault Vision authenticates a user they will be sent here to complete
+// the OIDC flow.
 func (o *Handler) getAuthCallback(
 	w http.ResponseWriter,
 	r *http.Request,
@@ -307,6 +326,8 @@ func (o *Handler) getAuthCallback(
 	return nil
 }
 
+// Logout clears the cookies and then sends the users to Vault Vision to clear
+// the session, then Vault Vision will redirect the user to /auth/logout.
 func (o *Handler) getLogout(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != "GET" {
 		return newError(http.StatusMethodNotAllowed, "")
@@ -334,6 +355,7 @@ func (o *Handler) getLogout(w http.ResponseWriter, r *http.Request) error {
 	return nil
 }
 
+// Once Vault Vision clears the users session, they return to this route.
 func (o *Handler) getAuthLogout(w http.ResponseWriter, r *http.Request) error {
 	if r.Method != "GET" {
 		return newError(http.StatusMethodNotAllowed, "")
