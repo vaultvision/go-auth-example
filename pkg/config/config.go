@@ -14,6 +14,8 @@ type Config struct {
 	VVIssuerURL    string `json:"VV_ISSUER_URL"`
 	VVClientID     string `json:"VV_CLIENT_ID"`
 	VVClientSecret string `json:"VV_CLIENT_SECRET"`
+
+	// VVRedirectURL string `json:"VV_REDIRECT_URL"`
 }
 
 func New() (*Config, error) {
